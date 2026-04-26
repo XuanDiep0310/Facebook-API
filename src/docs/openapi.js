@@ -1,12 +1,16 @@
 const openApiSpec = {
   openapi: '3.0.3',
   info: {
-    title: 'Facebook Page API',
-    version: '1.0.0',
-    description: 'Express proxy for Facebook Graph API endpoints for a Facebook Page.',
+    title: 'Facebook Page API + Webhook Service',
+    version: '2.0.0',
+    description:
+      'Express proxy for Facebook Graph API (port 3000) and real-time Webhook Service (port 3001) that receives Facebook events, verifies signatures, normalizes payloads, and publishes to Kafka topic `raw_events`.',
   },
-  servers: [{ url: 'http://localhost:3000' }],
-  tags: [{ name: 'Page' }, { name: 'Post' }],
+  servers: [
+    { url: 'http://localhost:3000', description: 'API Service' },
+    { url: 'http://localhost:3001', description: 'Webhook Service' },
+  ],
+  tags: [{ name: 'Page' }, { name: 'Post' }, { name: 'Webhook' }],
   paths: {
     '/api/page/{pageId}': {
       get: {
@@ -185,6 +189,96 @@ const openApiSpec = {
         },
       },
     },
+
+    // ─── Webhook Service (port 3001) ─────────────────────────────────────
+    '/webhook': {
+      get: {
+        tags: ['Webhook'],
+        summary: 'Facebook webhook verification handshake',
+        description:
+          'Facebook gửi GET request này khi đăng ký webhook. Service trả lại `hub.challenge` nếu `hub.verify_token` khớp với `WEBHOOK_VERIFY_TOKEN` trong `.env`.',
+        servers: [{ url: 'http://localhost:3001', description: 'Webhook Service' }],
+        parameters: [
+          {
+            name: 'hub.mode',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', enum: ['subscribe'] },
+          },
+          {
+            name: 'hub.verify_token',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Token phải khớp với WEBHOOK_VERIFY_TOKEN trong .env',
+          },
+          {
+            name: 'hub.challenge',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Chuỗi ngẫu nhiên do Facebook sinh ra, sẽ được trả lại',
+          },
+        ],
+        responses: {
+          200: { description: 'Trả lại hub.challenge — verification thành công' },
+          403: { description: 'Verify token không khớp' },
+        },
+      },
+      post: {
+        tags: ['Webhook'],
+        summary: 'Receive Facebook webhook event',
+        description:
+          'Facebook POST event này khi có bình luận, tin nhắn, reaction, ... Hệ thống xác thực chữ ký HMAC-SHA256 (`X-Hub-Signature-256`), normalize payload về schema chuẩn, rồi publish vào Kafka topic `raw_events`.',
+        servers: [{ url: 'http://localhost:3001', description: 'Webhook Service' }],
+        parameters: [
+          {
+            name: 'X-Hub-Signature-256',
+            in: 'header',
+            required: true,
+            schema: { type: 'string', example: 'sha256=abc123...' },
+            description: 'HMAC-SHA256 signature: sha256=<hex>. Ký bằng App Secret.',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/FacebookWebhookPayload' },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'EVENT_RECEIVED — đã nhận, đang xử lý async' },
+          403: { description: 'Chữ ký không hợp lệ' },
+          500: { description: 'Internal Server Error' },
+        },
+      },
+    },
+    '/health': {
+      get: {
+        tags: ['Webhook'],
+        summary: 'Health check của webhook service',
+        servers: [{ url: 'http://localhost:3001', description: 'Webhook Service' }],
+        responses: {
+          200: {
+            description: 'Service đang chạy',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string', example: 'ok' },
+                    service: { type: 'string', example: 'webhook-service' },
+                    port: { type: 'integer', example: 3001 },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     schemas: {
@@ -203,6 +297,45 @@ const openApiSpec = {
           error: {
             type: 'object',
             additionalProperties: true,
+          },
+        },
+      },
+      // Schema chuẩn sau khi normalize
+      NormalizedEvent: {
+        type: 'object',
+        description: 'Schema chuẩn của mọi event sau khi normalize, được publish vào Kafka topic raw_events',
+        properties: {
+          eventId:        { type: 'string', description: 'ID duy nhất của event' },
+          eventType:      { type: 'string', enum: ['comment', 'message', 'message_echo', 'postback', 'message_read', 'message_delivery', 'reaction', 'post', 'unknown'] },
+          verb:           { type: 'string', description: 'Hành động: created | edited | deleted | received ...' },
+          source:         { type: 'string', enum: ['facebook'] },
+          pageId:         { type: 'string' },
+          senderId:       { type: 'string' },
+          senderName:     { type: 'string', nullable: true },
+          recipientId:    { type: 'string' },
+          postId:         { type: 'string', nullable: true },
+          parentCommentId:{ type: 'string', nullable: true, description: 'ID comment cha nếu là reply' },
+          content:        { type: 'string', description: 'Nội dung text chính' },
+          timestamp:      { type: 'integer', description: 'Unix milliseconds' },
+          rawPayload:     { type: 'object', description: 'Payload gốc từ Facebook' },
+        },
+      },
+      FacebookWebhookPayload: {
+        type: 'object',
+        description: 'Payload gốc do Facebook gửi đến webhook',
+        properties: {
+          object: { type: 'string', example: 'page' },
+          entry:  {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id:       { type: 'string', description: 'Page ID' },
+                time:     { type: 'integer' },
+                changes:  { type: 'array', items: { type: 'object' }, description: 'Feed changes (comment, post, reaction)' },
+                messaging:{ type: 'array', items: { type: 'object' }, description: 'Messenger events' },
+              },
+            },
           },
         },
       },

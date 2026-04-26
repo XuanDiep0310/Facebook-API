@@ -3,6 +3,7 @@ import swaggerUi from 'swagger-ui-express';
 import { config } from './config.js';
 import openApiSpec from './docs/openapi.js';
 import pageRouter from './routes/pageApi.js';
+import { startWebhookServer } from './webhook/server.js';
 
 const app = express();
 
@@ -22,7 +23,13 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(config.port, () => {
-  console.log(`Listening on http://localhost:${config.port}`);
+  console.log(`[api-service]     Listening on http://localhost:${config.port}`);
+  console.log(`[api-service]     Swagger docs: http://localhost:${config.port}/docs`);
+});
+
+// Khởi động Webhook Service (port 3001) song song
+startWebhookServer().catch((err) => {
+  console.error('[webhook-service] Failed to start:', err);
 });
 
 /*
