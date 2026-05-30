@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Giai đoạn 6: Tích hợp & Kiểm thử toàn bộ luồng</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <div class="max-w-5xl mx-auto px-4 py-12">
+    <!-- Header -->
+    <header class="border-b border-slate-800 pb-8 mb-12 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <span class="px-3 py-1 text-xs font-semibold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20">
+          Giai đoạn 6 - Hoàn thành
+        </span>
+        <h1 class="text-3xl font-bold tracking-tight text-white mt-3">Tích hợp & Kiểm thử toàn bộ luồng</h1>
+        <p class="text-slate-400 mt-2">Hướng dẫn kiểm chứng hoạt động của toàn bộ hệ thống phân tán và các kịch bản lỗi, retry.</p>
+      </div>
+      <div class="text-sm text-slate-400 md:text-right">
+        <p>Học phần: Lập trình API</p>
+        <p class="font-semibold text-slate-200 mt-1">Hệ thống quản lý Facebook Page</p>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      
+      <!-- Left Column: Testing Scenarios -->
+      <div class="lg:col-span-2 space-y-8">
+        <section class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-sm backdrop-blur-sm">
+          <h2 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+            <span class="w-2 h-6 bg-emerald-500 rounded"></span> Các kịch bản kiểm thử (Test Scenarios)
+          </h2>
+          <div class="space-y-6">
+            <div class="border-l-4 border-emerald-500 pl-4">
+              <strong class="text-slate-100 block">Kịch bản 1: Nhận tin nhắn & Phân tích AI & Phản hồi thành công</strong>
+              <p class="text-xs text-slate-400 mt-1">Gửi comment bình thường, ví dụ: <em>"Shop oi gia bao nhieu"</em>. Hệ thống chuẩn hóa, AI nhận diện là ý định hỏi giá (<code class="text-slate-300">ask_price</code>), backend thực hiện reply lên Facebook và lưu vào database.</p>
+            </div>
+            
+            <div class="border-l-4 border-emerald-500 pl-4">
+              <strong class="text-slate-100 block">Kịch bản 2: Phát hiện spam link & Ẩn tự động</strong>
+              <p class="text-xs text-slate-400 mt-1">Gửi comment chứa link rác: <em>"Mua ngay tai http://scam.vn"</em>. Rule Engine lập tức ẩn bình luận và đánh dấu trạng thái <code class="text-slate-300">pending_review</code> mà không chạy phân tích AI.</p>
+            </div>
+
+            <div class="border-l-4 border-emerald-500 pl-4">
+              <strong class="text-slate-100 block">Kịch bản 3: Kiểm soát Rate Limit cục bộ</strong>
+              <p class="text-xs text-slate-400 mt-1">Gửi liên tục 21 comment trong vòng dưới 1 phút từ cùng một tài khoản. Hệ thống kích hoạt rate limit, toàn bộ comment vượt ngưỡng sẽ không được phân tích AI/reply, tự động đưa vào danh sách duyệt thủ công.</p>
+            </div>
+
+            <div class="border-l-4 border-emerald-500 pl-4">
+              <strong class="text-slate-100 block">Kịch bản 4: Tự động đưa vào Blacklist nội bộ</strong>
+              <p class="text-xs text-slate-400 mt-1">Nếu 1 tài khoản spam (chứa link hoặc AI đánh dấu là spam) lớn hơn 3 lần trong vòng 24 giờ, tài khoản đó sẽ tự động bị đưa vào danh sách đen. Mọi comment sau đó sẽ bị phớt lờ (<code class="text-slate-300">ignored</code>).</p>
+            </div>
+
+            <div class="border-l-4 border-red-500 pl-4">
+              <strong class="text-slate-100 block">Kịch bản 5: Lỗi kết nối & Retry Backoff & Dead Letter Queue</strong>
+              <p class="text-xs text-slate-400 mt-1">Khi Backend API gọi Facebook API thất bại (ví dụ: mất mạng hoặc Facebook lỗi 500), Backend đẩy lỗi sang <code class="text-slate-300">send_failed</code>. Retry Service trì hoãn lũy thừa (1s, 2s, 4s, 8s, 16s) và gửi lại. Sau 5 lần thất bại liên tục, đẩy vào <code class="text-slate-300">dead_letter</code> kích hoạt Slack Alarm.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Command test runner -->
+        <section class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6 shadow-sm">
+          <h2 class="text-xl font-semibold text-white mb-4">🚀 Hướng dẫn chạy thử nghiệm bằng Script giả lập</h2>
+          <p class="text-sm text-slate-300 mb-4">Chúng tôi cung cấp script <code class="text-cyan-300 bg-slate-750 px-1 py-0.5 rounded text-xs">test_webhook.js</code> tự động tạo chữ ký bảo mật HMAC-SHA256 phù hợp với App Secret để giả lập cuộc gọi từ Facebook.</p>
+          <div class="space-y-4">
+            <div>
+              <span class="text-xs text-slate-400 block mb-1">Chạy thử comment hỏi giá bình thường:</span>
+              <pre class="bg-slate-950 p-2.5 rounded font-mono text-emerald-400 border border-slate-800 text-xs">node test_webhook.js "Shop oi gia bao nhieu"</pre>
+            </div>
+            <div>
+              <span class="text-xs text-slate-400 block mb-1">Chạy thử comment spam link:</span>
+              <pre class="bg-slate-950 p-2.5 rounded font-mono text-emerald-400 border border-slate-800 text-xs">node test_webhook.js "Nhan qua free tai http://scam.org"</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Troubleshooting Section -->
+        <section class="bg-slate-800/50 border border-rose-500/30 rounded-xl p-6 shadow-sm">
+          <h2 class="text-xl font-semibold text-rose-400 mb-4 flex items-center gap-2">
+            <span class="w-2 h-6 bg-rose-500 rounded"></span> Sửa lỗi (#200) Permissions error từ Facebook Graph API
+          </h2>
+          <p class="text-sm text-slate-300 mb-4">Khi chạy trên comment thật từ Facebook, nếu gặp lỗi <code class="text-rose-400 bg-slate-950 px-1 py-0.5 rounded text-xs">OAuthException (200) Permissions error</code>, nguyên nhân chính là do <strong>Page Access Token</strong> của bạn bị thiếu quyền ghi tương tác.</p>
+          
+          <div class="space-y-4 text-sm text-slate-300">
+            <div class="bg-rose-500/10 border border-rose-500/20 p-3 rounded-lg">
+              <strong class="text-rose-400 block">Quyền bị thiếu: <code class="text-white bg-rose-950 px-1 rounded text-xs">pages_manage_engagement</code></strong>
+              <p class="text-xs text-slate-400 mt-1">Token hiện tại của bạn chỉ có quyền đọc tin nhắn/bài viết (<code class="text-slate-300">pages_read_engagement</code>, <code class="text-slate-300">pages_manage_posts</code>, <code class="text-slate-300">pages_manage_metadata</code>). Để bình luận hoặc ẩn bình luận, bắt buộc phải có <code class="text-emerald-400">pages_manage_engagement</code>.</p>
+            </div>
+            
+            <div>
+              <strong class="text-slate-200 block mb-1">Các bước khắc phục:</strong>
+              <ol class="list-decimal list-inside space-y-2 text-xs text-slate-455">
+                <li>Truy cập <a href="https://developers.facebook.com" target="_blank" class="text-cyan-400 hover:underline">Facebook Developers Dashboard</a> và chọn App của bạn.</li>
+                <li>Mở công cụ <a href="https://developers.facebook.com/tools/explorer/" target="_blank" class="text-cyan-400 hover:underline">Graph API Explorer</a>.</li>
+                <li>Chọn <strong>Meta App</strong> tương ứng, ở phần <strong>User or Page</strong> chọn Page của bạn.</li>
+                <li>Tại phần <strong>Permissions</strong>, thêm quyền <strong class="text-slate-200">pages_manage_engagement</strong> (và <strong class="text-slate-200">pages_manage_posts</strong>, <strong class="text-slate-200">pages_read_engagement</strong>).</li>
+                <li>Nhấn <strong>Generate Access Token</strong> và đồng ý cấp quyền.</li>
+                <li>Sao chép Page Access Token mới thu được.</li>
+                <li>Cập nhật token mới vào file <code class="text-cyan-400">services/backend-api/.env</code> tại biến <code class="text-white">FACEBOOK_PAGE_ACCESS_TOKEN</code>.</li>
+                <li>Khởi động lại backend API.</li>
+              </ol>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Verification instructions -->
+      <div class="space-y-8">
+        <!-- Verification Links -->
+        <section class="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
+          <h3 class="text-lg font-semibold text-white mb-3">🔍 Kiểm tra dữ liệu</h3>
+          <div class="space-y-4 text-xs text-slate-300">
+            <div>
+              <strong class="text-slate-100 block mb-1">1. Dữ liệu trong Database:</strong>
+              <span class="text-slate-400">Kết nối PostgreSQL và truy vấn lịch sử comment:</span>
+              <pre class="bg-slate-950 p-2 mt-1 rounded font-mono text-emerald-400 border border-slate-800">docker exec -it fb_api-postgres psql -U fb_api_user -d fb_api_db</pre>
+              <pre class="bg-slate-950 p-2 mt-1 rounded font-mono text-cyan-400 border border-slate-800">SELECT comment_id, message, intent, sentiment, status FROM comments;</pre>
+            </div>
+            <div>
+              <strong class="text-slate-100 block mb-1">2. Trạng thái các Kafka topics:</strong>
+              <span class="text-slate-400">Truy cập giao diện quản trị Kafka UI:</span>
+              <p class="mt-1"><a href="http://localhost:8080" target="_blank" class="text-emerald-400 hover:underline">http://localhost:8080</a></p>
+            </div>
+            <div>
+              <strong class="text-slate-100 block mb-1">3. Prometheus & Alerts:</strong>
+              <span class="text-slate-400">Xem metrics và các cảnh báo kích hoạt:</span>
+              <p class="mt-1"><a href="http://localhost:9090" target="_blank" class="text-emerald-400 hover:underline">http://localhost:9090</a></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Complete summary -->
+        <div class="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-xl p-6">
+          <h4 class="text-sm font-semibold text-emerald-400 uppercase tracking-wider">Tổng kết dự án</h4>
+          <h3 class="text-lg font-bold text-white mt-1">Hệ thống phân tán đã sẵn sàng!</h3>
+          <p class="text-sm text-slate-400 mt-2">Dự án đã được phân rã thành 4 microservices hoàn toàn độc lập, đảm bảo khả năng chịu lỗi, tính idempotent và sẵn sàng để demo.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 mt-12 pt-6 text-center text-xs text-slate-500">
+      Báo cáo được tạo tự động bởi Antigravity AI.
+    </footer>
+  </div>
+</body>
+</html>
