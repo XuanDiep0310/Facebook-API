@@ -5,8 +5,8 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "start": "echo \"Please run npm run dev inside the individual directories under services/ to start each microservice.\"",
+    "dev": "echo \"Please run npm run dev inside the individual directories under services/ to start each microservice.\""
   },
   "engines": {
     "node": ">=18"
