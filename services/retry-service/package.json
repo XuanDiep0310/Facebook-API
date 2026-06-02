@@ -1,15 +1,14 @@
 {
   "name": "retry-service",
   "version": "1.0.0",
-  "type": "module",
-  "main": "src/server.js",
+  "description": "Retry Service - Exponential backoff retry with dead letter queue",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "express": "^4.21.0",
     "kafkajs": "^2.2.4"
   }
 }
